@@ -1,98 +1,56 @@
-import os
-import time
-import threading
+import os, time, threading
 from flask import Flask
-from telegram import Update, ReplyKeyboardMarkup, BotCommand
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 TOKEN = os.environ.get("BOT_TOKEN")
 app = Flask(__name__)
 
-# تخزين مؤقت - لو عايز تخزن في ملف بعدين بنعملو
 balances = {}
 last_daily = {}
+referrals = {}
 
-def get_main_keyboard():
+# الكيبورد الثابت التحت - زي GoldenPlay بالضبط وما بيتكرر
+def main_keyboard():
     keyboard = [
-        ["💰 رصيدي", "🎁 المكافأة اليومية"],
-        ["📢 العروض", "👥 دعوة الأصدقاء"],
-        ["📋 مهامي", "🛍️ متجر المنتجات"],
-        ["ℹ️ المساعدة", "📊 سجل النقاط"]
+        ["🎁 متجر العروض"],
+        ["💎 جمع النقاط", "⭐ شحن رصيد"],
+        ["👤 حسابي والإحالة", "ℹ️ مساعدة وقناة"]
     ]
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
+def format_balance(uid):
+    return balances.get(uid, 0)
+
+# /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if uid not in balances:
-        balances[uid] = 0
-    await update.message.reply_text(
-        "اجمع 15 نقطة من المكافأة اليومية مرة كل 24 ساعة.\nاختر من القائمة تحت:",
-        reply_markup=get_main_keyboard()
-    )
+        balances[uid] = 9 # نفس ما في الصورة 9
+        referrals[uid] = 0
+    
+    # لو جاي برابط احالة
+    if context.args and context.args[0].isdigit():
+        ref_id = int(context.args[0])
+        if ref_id != uid and ref_id in balances:
+            balances[ref_id] = balances.get(ref_id, 0) + 2
+            referrals[ref_id] = referrals.get(ref_id, 0) + 1
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = f"👋 مرحباً بك في بوت Zeno Rewards\n\n🆔 الآيدي: {uid}\n💎 الرصيد: {format_balance(uid)}\n\nاختر من القائمة أدناه:"
+    await update.message.reply_text(text, reply_markup=main_keyboard())
+
+# متجر العروض - عروضك انت ما اتغيرت
+async def store_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = [
+        [InlineKeyboardButton("💳 بطاقة فيزا حقيقية (10 💎)", callback_data="buy_visa")],
+        [InlineKeyboardButton("إغلاق", callback_data="close")]
+    ]
+    text = "🎁 متجر العروض والخدمات\n\nاختر الخدمة المطلوبة من القائمة أدناه:"
+    await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(keyboard))
+
+# جمع النقاط
+async def points_section(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    text = update.message.text
-    if uid not in balances:
-        balances[uid] = 0
-
-    # بدون كيبورد هنا - دا سر الحل
-    if "رصيدي" in text:
-        await update.message.reply_text(f"رصيدك الحالي: {balances[uid]} نقطة.")
-        return
-
-    if "المكافأة اليومية" in text:
-        now = time.time()
-        last = last_daily.get(uid, 0)
-        if now - last < 24*3600:
-            remain = 24*3600 - (now-last)
-            h = int(remain//3600)
-            m = int((remain%3600)//60)
-            await update.message.reply_text(f"لقد استلمت المكافأة اليومية بالفعل. حاول بعد نحو {h} ساعة و {m} دقيقة.")
-            return
-        balances[uid] += 15
-        last_daily[uid] = now
-        await update.message.reply_text(f"تم! استلمت 15 نقطة. رصيدك الآن {balances[uid]} نقطة.")
-        return
-
-    if "العروض" in text:
-        await update.message.reply_text("لا توجد عروض متاحة حالياً.")
-        return
-
-    if "متجر" in text:
-        await update.message.reply_text("لا توجد منتجات متاحة حالياً.")
-        return
-
-    if "مهامي" in text:
-        await update.message.reply_text("لا توجد مهام متاحة حالياً.")
-        return
-
-    if "دعوة" in text:
-        await update.message.reply_text(f"رابط دعوتك: https://t.me/{context.bot.username}?start={uid}")
-        return
-
-    if "سجل النقاط" in text:
-        await update.message.reply_text(f"سجل نقاطك: {balances[uid]} نقطة من المكافأة اليومية.")
-        return
-
-    if "المساعدة" in text:
-        await update.message.reply_text("للمساعدة تواصل مع المشرف.")
-        return
-
-async def post_init(application):
-    await application.bot.delete_my_commands()
-    await application.bot.set_my_commands([BotCommand("start","بدء")])
-
-def run_bot():
-    application = Application.builder().token(TOKEN).post_init(post_init).build()
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-    application.run_polling()
-
-@app.route('/')
-def home():
-    return "Zeno Live"
-
-if __name__ == "__main__":
-    threading.Thread(target=run_bot, daemon=True).start()
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
+    bal = format_balance(uid)
+    keyboard = [
+       
