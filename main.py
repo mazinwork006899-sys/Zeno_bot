@@ -1,51 +1,79 @@
 import os
 import threading
 from flask import Flask
-from telegram import BotCommand, Update
-from telegram.ext import Application, CommandHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, BotCommand
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 TOKEN = os.environ.get("BOT_TOKEN")
 app = Flask(__name__)
 
-# === هنا تعدل الأوامر العايزها تظهر في قائمة تليجرام ===
-MY_COMMANDS = [
-    BotCommand("start", "🚀 بدء البوت"),
-    BotCommand("help", "❓ المساعدة"),
-    BotCommand("id", "🆔 معرفي"),
-]
+def main_keyboard():
+    keyboard = [
+        [InlineKeyboardButton("🎁 المكافأة اليومية", callback_data="daily"),
+         InlineKeyboardButton("💰 رصيدي", callback_data="balance")],
+        [InlineKeyboardButton("👥 دعوة الأصدقاء", callback_data="invite"),
+         InlineKeyboardButton("📢 العروض", callback_data="offers")],
+        [InlineKeyboardButton("🛍️ متجر المنتجات", callback_data="shop"),
+         InlineKeyboardButton("📋 مهامي", callback_data="tasks")],
+        [InlineKeyboardButton("📊 سجل النقاط", callback_data="log"),
+         InlineKeyboardButton("ℹ️ المساعدة", callback_data="help")]
+    ]
+    return InlineKeyboardMarkup(keyboard)
 
-# === الهاندلرز ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"أهلا {update.effective_user.first_name} 👋\nالبوت شغال تمام!")
+    text = (
+        "اجمع 15 نقطة من المكافأة اليومية مرة كل 24 ساعة.\n"
+        "تُضاف نقاط المهام بعد مراجعة الإثباتات واعتماده من المشرف.\n\n"
+        "اضغط «🎁 ابدأ» لعرض الخيارات."
+    )
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🎁 ابدأ", callback_data="main")]])
+    await update.message.reply_text(text, reply_markup=btn)
 
-async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("الأوامر:\n/start - بدء\n/help - مساعدة\n/id - معرفك")
+async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer() # مهم جداً عشان ما يعلق ويكرر
 
-async def id_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"الـ ID بتاعك: {update.effective_user.id}")
+    data = query.data
 
-# دا بحل مشكلة تكرار القائمة
+    if data == "main":
+        await query.message.reply_text("اختر ما تريد من القائمة:", reply_markup=main_keyboard())
+        return
+
+    if data == "offers":
+        # هنا كان التكرار - كنا بنرسل رسالتين مع كيبورد
+        # الصح: رسالة واحدة بس بدون كيبورد جديد
+        await query.message.reply_text("لا توجد عروض متاحة حالياً. ستتوفر عروض جديدة لاحقاً.")
+        return
+
+    if data == "shop":
+        await query.message.reply_text("لا توجد منتجات متاحة حالياً. ستظهر المنتجات بعد أن يضيفها المشرف ويؤكد توفر مخزون فعلي.")
+        return
+
+    if data == "balance":
+        await query.message.reply_text("💰 رصيدك الحالي: 0 نقطة")
+        return
+
+    if data == "daily":
+        await query.message.reply_text("🎁 تم جمع 15 نقطة! تعال بعد 24 ساعة.")
+        return
+
+    # باقي الازرار
+    await query.message.reply_text(f"تم اختيار: {data}")
+
 async def post_init(application):
     await application.bot.delete_my_commands()
-    await application.bot.set_my_commands(MY_COMMANDS)
-    print("Commands set successfully")
+    await application.bot.set_my_commands([BotCommand("start","بدء البوت")])
 
 def run_bot():
-    if not TOKEN:
-        print("ERROR: BOT_TOKEN not set!")
-        return
     application = Application.builder().token(TOKEN).post_init(post_init).build()
     application.add_handler(CommandHandler("start", start))
-    application.add_handler(CommandHandler("help", help_cmd))
-    application.add_handler(CommandHandler("id", id_cmd))
-    print("Bot polling started...")
+    application.add_handler(CallbackQueryHandler(button_handler))
     application.run_polling()
 
 @app.route('/')
 def home():
-    return "Zeno Bot is Live ✅"
+    return "Zeno Rewards Live ✅"
 
 if __name__ == "__main__":
     threading.Thread(target=run_bot, daemon=True).start()
-    port = int(os.environ.get("PORT", 10000))
-    app.run(host='0.0.0.0', port=port)
+    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))
